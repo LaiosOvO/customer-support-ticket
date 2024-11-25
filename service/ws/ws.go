@@ -2,12 +2,14 @@ package ws
 
 import (
 	"fmt"
-	"github.com/flipped-aurora/gin-vue-admin/server/example/gofly/models"
+	"github.com/flipped-aurora/gin-vue-admin/server/model/chat"
 	"github.com/gin-gonic/gin"
 	"github.com/goccy/go-json"
 	"github.com/gorilla/websocket"
+	"gopkg.in/fatih/set.v0"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -23,6 +25,17 @@ type User struct {
 	Role_id    string
 	Mux        sync.Mutex
 	UpdateTime time.Time
+}
+
+type Node struct {
+	Conn         *websocket.Conn
+	Addr         string
+	FirstTime    uint64
+	HearbeatTime uint64
+	LoginTime    uint64
+	DataQueue    chan []byte
+	GroupSets    set.Interface
+	Mux          sync.Mutex
 }
 
 type Message struct {
@@ -79,7 +92,7 @@ func init() {
 func UpdateVisitorStatusCron() {
 
 	for {
-		visitors := models.FindVisitorsOnline()
+		visitors := chat.FindVisitorsOnline()
 
 		for _, visitor := range visitors {
 			if visitor.VisitorId == "" {
@@ -87,7 +100,7 @@ func UpdateVisitorStatusCron() {
 			}
 			_, ok := ClientList[visitor.VisitorId]
 			if !ok {
-				models.UpdateVisitorStatus(visitor.VisitorId, 0)
+				chat.UpdateVisitorStatus(visitor.VisitorId, 0)
 			}
 
 			SendPingToKefuClient()
@@ -127,12 +140,6 @@ func (wsservice *WSService) HandleAllMessageDispatch() {
 		fmt.Println(data)
 		fmt.Println(data.content)
 
-		//if data.is_kefu {
-		//	// kefu 下发给用户
-		//
-		//} else {
-		//
-		//}
 		var typeMsg TypeMessage
 		json.Unmarshal(data.content, &typeMsg)
 		conn := data.conn
@@ -157,15 +164,57 @@ func (wsservice *WSService) HandleAllMessageDispatch() {
 			data1 := typeMsg.Data.(map[string]interface{})
 
 			to := data1["to"].(string)
-			from := data1["from"].(string)
+			//from := data1["from"].(string)
 			// 分发消息
 			if data.is_kefu {
-				kefuInfo := models.FindUserById(from)
-				VisitorMessage(to, data1["content"].(string), kefuInfo)
+				OneVisitorMessage(to, data.content)
 			} else {
 				OneKefuMessage(to, data.content)
 			}
 
 		}
 	}
+}
+
+func (wsservice *WSService) SendMessageV2(c *gin.Context) {
+	fromId := c.PostForm("from_id")
+	toId := c.PostForm("to_id")
+	content := c.PostForm("content")
+	cType := c.PostForm("type")
+	//is_kefu := c.PostForm("is_kefu")
+	is_kefu, _ := strconv.ParseBool(c.PostForm("is_kefu"))
+
+	if content == "" {
+		c.JSON(200, gin.H{
+			"code": 400,
+			"msg":  "内容不能为空",
+		})
+		return
+	}
+
+	var kefuInfo chat.User
+	var vistorInfo chat.Visitor
+
+	if is_kefu || cType == "kefu" {
+		kefuInfo = chat.FindUser(fromId)
+		vistorInfo = chat.FindVisitorByVistorId(toId)
+	} else {
+		kefuInfo = chat.FindUser(toId)
+		vistorInfo = chat.FindVisitorByVistorId(fromId)
+	}
+
+	if kefuInfo.ID == 0 || vistorInfo.ID == 0 {
+		c.JSON(200, gin.H{
+			"code": 400,
+			"msg":  "用户不存在",
+		})
+		return
+	}
+
+	chat.CreateMessage(kefuInfo.Name, vistorInfo.VisitorId, content, cType)
+
+	c.JSON(200, gin.H{
+		"code": 200,
+		"msg":  "ok",
+	})
 }

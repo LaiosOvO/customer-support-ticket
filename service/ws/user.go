@@ -1,12 +1,11 @@
 package ws
 
 import (
-	"github.com/flipped-aurora/gin-vue-admin/server/example/gofly/models"
+	"github.com/flipped-aurora/gin-vue-admin/server/model/chat"
 	"github.com/gin-gonic/gin"
 	"github.com/goccy/go-json"
 	"github.com/gorilla/websocket"
 	"log"
-	"strconv"
 	"time"
 )
 
@@ -15,7 +14,7 @@ type KeFuService struct{}
 func (KeFuService *KeFuService) NewKefuServer(c *gin.Context) {
 
 	kefuId := c.Query("kefu_id")
-	kefuInfo := models.FindUserById(kefuId)
+	kefuInfo := chat.FindUser(kefuId)
 
 	if kefuInfo.ID == 0 {
 		c.JSON(200, gin.H{
@@ -30,7 +29,6 @@ func (KeFuService *KeFuService) NewKefuServer(c *gin.Context) {
 		log.Println("upgrade: ", err)
 		return
 	}
-
 	// 构建node
 	// 将登陆的客服放入map
 	currentTime := uint64(time.Now().Unix())
@@ -41,19 +39,19 @@ func (KeFuService *KeFuService) NewKefuServer(c *gin.Context) {
 		LoginTime:    currentTime,
 		DataQueue:    make(chan []byte, 50),
 	}
-	KefuMap[strconv.Itoa(int(kefuInfo.ID))] = node
+	KefuMap[kefuInfo.Name] = node
 
 	// 获取Get参数
-	var kefu User
-	kefu.Id = kefuInfo.Name
-	kefu.Name = kefuInfo.Nickname
-	kefu.Avator = kefuInfo.Avator
-	kefu.Role_id = kefuInfo.RoleId
-	kefu.Conn = conn
-	AddKeufuToList(&kefu)
+	//var kefu User
+	//kefu.Id = kefuInfo.Name
+	//kefu.Name = kefuInfo.Nickname
+	//kefu.Avator = kefuInfo.Avator
+	//kefu.Role_id = kefuInfo.RoleId
+	//kefu.Conn = conn
+	//AddKeufuToList(&kefu)
 
 	//receiveMsg(conn, c)
-	kefuReceiveMsg(conn, c)
+	go kefuReceiveMsg(conn, c)
 }
 
 // kefu下发消息到用户
@@ -77,44 +75,25 @@ func kefuReceiveMsg(conn *websocket.Conn, c *gin.Context) {
 	}
 }
 
-func receiveMsg(conn *websocket.Conn, c *gin.Context) {
-	for {
-		var receive []byte
-		messageType, receive, err := conn.ReadMessage()
-		if err != nil {
-			log.Println("ws/user.go", err)
-			conn.Close()
-			return
-		}
-
-		message <- &Message{
-			conn:        conn,
-			content:     receive,
-			context:     c,
-			messageType: messageType,
-		}
-	}
-}
-
-func AddKeufuToList(kefu *User) {
-	oldUser, ok := KefuList[kefu.Id]
-	if oldUser != nil || ok {
-		msg := TypeMessage{
-			Type: "close",
-			Data: kefu.Id,
-		}
-
-		str, _ := json.Marshal(msg)
-		if err := oldUser.Conn.WriteMessage(websocket.TextMessage, str); err != nil {
-			oldUser.Conn.Close()
-		}
-	}
-	KefuList[kefu.Id] = kefu
-}
+//func AddKeufuToList(kefu *User) {
+//	oldUser, ok := KefuList[kefu.Id]
+//	if oldUser != nil || ok {
+//		msg := TypeMessage{
+//			Type: "close",
+//			Data: kefu.Id,
+//		}
+//
+//		str, _ := json.Marshal(msg)
+//		if err := oldUser.Conn.WriteMessage(websocket.TextMessage, str); err != nil {
+//			oldUser.Conn.Close()
+//		}
+//	}
+//	KefuList[kefu.Id] = kefu
+//}
 
 // 给客服【toid】发送消息
 func OneKefuMessage(toId string, str []byte) {
-	kefu, ok := KefuList[toId]
+	kefu, ok := KefuMap[toId]
 	if ok {
 		log.Println("OneKefuMessage lock")
 		kefu.Mux.Lock()
@@ -126,7 +105,7 @@ func OneKefuMessage(toId string, str []byte) {
 	}
 }
 
-func KefuMessage(visitorId, content string, kefuInfo models.User) {
+func KefuMessage(visitorId, content string, kefuInfo chat.User) {
 	msg := TypeMessage{
 		Type: "message",
 		Data: ClientMessage{

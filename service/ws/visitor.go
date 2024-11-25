@@ -1,7 +1,7 @@
 package ws
 
 import (
-	"github.com/flipped-aurora/gin-vue-admin/server/example/gofly/models"
+	"github.com/flipped-aurora/gin-vue-admin/server/model/chat"
 	"github.com/gin-gonic/gin"
 	"github.com/goccy/go-json"
 	"github.com/gorilla/websocket"
@@ -20,7 +20,7 @@ func (v *VisitorService) NewVistorServer(c *gin.Context) {
 	}
 
 	// 获取get参数 创建ws连接
-	vistorInfo := models.FindVisitorByVistorId(c.Query("visitor_id"))
+	vistorInfo := chat.FindVisitorByVistorId(c.Query("visitor_id"))
 	if vistorInfo.VisitorId == "" {
 		c.JSON(200, gin.H{
 			"code": 404,
@@ -48,7 +48,7 @@ func (v *VisitorService) NewVistorServer(c *gin.Context) {
 	}
 	ClientMap[c.Query("visitor_id")] = node
 
-	go models.UpdateVisitorStatus(vistorInfo.VisitorId, 1)
+	go chat.UpdateVisitorStatus(vistorInfo.VisitorId, 1)
 	//AddVisitorToList(user)
 	// 接受消息
 
@@ -84,7 +84,7 @@ func visitorReceiveMsg(conn *websocket.Conn, c *gin.Context) {
 	}
 }
 
-func VisitorMessage(visitorId, content string, kefuInfo models.User) {
+func VisitorMessage(visitorId, content string, kefuInfo chat.User) {
 	msg := TypeMessage{
 		Type: "message",
 		Data: ClientMessage{
@@ -106,9 +106,21 @@ func VisitorMessage(visitorId, content string, kefuInfo models.User) {
 	visitor.Conn.WriteMessage(websocket.TextMessage, str)
 }
 
-func VisitorOffline(kefuId string, visitorId string, visitorName string) {
+func OneVisitorMessage(toId string, str []byte) {
+	visitor, ok := ClientMap[toId]
+	if ok {
+		log.Println("OneKefuMessage lock")
+		visitor.Mux.Lock()
+		defer visitor.Mux.Unlock()
+		error := visitor.Conn.WriteMessage(websocket.TextMessage, str)
+		if error != nil {
+			log.Println("匿名用户发送消息失败", error)
+		}
+	}
+}
 
-	models.UpdateVisitorStatus(visitorId, 0)
+func VisitorOffline(kefuId string, visitorId string, visitorName string) {
+	chat.UpdateVisitorStatus(visitorId, 0)
 	userInfo := make(map[string]string)
 	userInfo["uid"] = visitorId
 	userInfo["name"] = visitorName
@@ -138,7 +150,7 @@ func AddVisitorToList(user *User) {
 	}
 
 	ClientList[user.Id] = user
-	//lastMessage := models.FindLastMessageByVisitorId(user.Id)
+	//lastMessage := chat.FindLastMessageByVisitorId(user.Id)
 	userInfo := make(map[string]string)
 	userInfo["uid"] = user.Id
 	userInfo["username"] = user.Name
